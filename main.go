@@ -28,7 +28,7 @@ var (
 const maxValueWidth = 80
 
 func main() {
-	format := flag.String("format", "table", "Output format (table, markdown, html, svg)")
+	format := flag.String("format", "table", "Output format table/html")
 	details := flag.Bool("d", false, "Show details (caption)")
 	maxWidth := flag.Int("w", maxValueWidth, "Maximum width for values")
 	flag.Parse()
@@ -36,7 +36,7 @@ func main() {
 	input, selector := readInput()
 	data := parseInput(input)
 	data = applySelector(data, selector)
-	
+
 	render(data, *format, *details, *maxWidth)
 }
 
@@ -100,23 +100,23 @@ func applySelector(data interface{}, selector string) interface{} {
 
 	// Split the selector path (e.g., ".nested.key1" -> ["nested", "key1"])
 	path := strings.Split(strings.TrimPrefix(selector, "."), ".")
-	
+
 	current := data
 	for i, key := range path {
 		m, ok := current.(map[string]interface{})
 		if !ok {
-			fmt.Fprintf(os.Stderr, "Error: cannot traverse into non-object at path '%s'\n", 
+			fmt.Fprintf(os.Stderr, "Error: cannot traverse into non-object at path '%s'\n",
 				strings.Join(path[:i], "."))
 			os.Exit(1)
 		}
 
 		val, exists := m[key]
 		if !exists {
-			fmt.Fprintf(os.Stderr, "Error: key '%s' not found in path '%s'\n", 
+			fmt.Fprintf(os.Stderr, "Error: key '%s' not found in path '%s'\n",
 				key, strings.Join(path[:i+1], "."))
 			os.Exit(1)
 		}
-		
+
 		current = val
 	}
 
@@ -125,7 +125,7 @@ func applySelector(data interface{}, selector string) interface{} {
 
 func render(data interface{}, format string, details bool, maxWidth int) {
 	output := renderRecursive(data, details, format, maxWidth)
-	
+
 	// For HTML, add CSS styling at the beginning
 	if format == "html" {
 		fmt.Println(`<style>
@@ -147,9 +147,9 @@ func render(data interface{}, format string, details bool, maxWidth int) {
 .jt-nested { color: #c6d0f5; }
 </style>`)
 	}
-	
+
 	// For HTML and Markdown, write directly without extra formatting
-	if format == "html" || format == "markdown" {
+	if format == "html" {
 		fmt.Print(output)
 	} else {
 		fmt.Println(output)
@@ -159,10 +159,10 @@ func render(data interface{}, format string, details bool, maxWidth int) {
 func renderRecursive(data interface{}, details bool, format string, maxWidth int) string {
 	var buf bytes.Buffer
 	table := createTable(&buf, format)
-	
+
 	appendData(table, data, details, format, maxWidth)
 	table.Render()
-	
+
 	return buf.String()
 }
 
@@ -172,7 +172,7 @@ func createTable(buf *bytes.Buffer, format string) *tablewriter.Table {
 		return tablewriter.NewTable(buf, tablewriter.WithRenderer(renderer.NewMarkdown()))
 	case "html":
 		cfg := renderer.HTMLConfig{
-			TableClass:  "jt-table",
+			TableClass:    "jt-table",
 			EscapeContent: false,
 		}
 		return tablewriter.NewTable(buf, tablewriter.WithRenderer(renderer.NewHTML(cfg)))
@@ -196,18 +196,18 @@ func truncateValue(s string, maxWidth int) string {
 	// Replace newlines with spaces for single-line display
 	s = strings.ReplaceAll(s, "\n", " ")
 	s = strings.ReplaceAll(s, "\r", " ")
-	
+
 	// Collapse multiple spaces
 	for strings.Contains(s, "  ") {
 		s = strings.ReplaceAll(s, "  ", " ")
 	}
-	
+
 	s = strings.TrimSpace(s)
-	
+
 	if len(s) <= maxWidth {
 		return s
 	}
-	
+
 	return s[:maxWidth-3] + "..."
 }
 
@@ -250,14 +250,14 @@ func appendData(table *tablewriter.Table, data interface{}, details bool, format
 		if details {
 			table.Caption(tw.Caption{Text: fmt.Sprintf("[-] Object, %d properties", len(v))})
 		}
-		
+
 		// Sort keys for consistent output
 		keys := make([]string, 0, len(v))
 		for key := range v {
 			keys = append(keys, key)
 		}
 		sort.Strings(keys)
-		
+
 		for _, key := range keys {
 			val := v[key]
 			value := formatValue(val, details, format, maxWidth)
@@ -285,10 +285,10 @@ func appendRow(table *tablewriter.Table, key, value string, originalVal interfac
 	} else if format == "html" {
 		// Add color styling via CSS classes for HTML output
 		cssClass := getHTMLClass(originalVal)
-		
+
 		styledKey := fmt.Sprintf(`<span class="jt-key">%s</span>`, key)
 		styledValue := fmt.Sprintf(`<span class="%s">%s</span>`, cssClass, value)
-		
+
 		table.Append([]string{styledKey, styledValue})
 	} else {
 		table.Append([]string{key, value})
