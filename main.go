@@ -126,6 +126,28 @@ func applySelector(data interface{}, selector string) interface{} {
 func render(data interface{}, format string, details bool, maxWidth int) {
 	output := renderRecursive(data, details, format, maxWidth)
 	
+	// For HTML, add CSS styling at the beginning
+	if format == "html" {
+		fmt.Println(`<style>
+.jt-table {
+	border-collapse: collapse;
+	background-color: #303446;
+	border: 1px solid #414559;
+	margin: 5px;
+}
+.jt-table td {
+	border: 1px solid #414559;
+	padding: 8px;
+	text-align: left;
+}
+.jt-key { color: #c6d0f5; }
+.jt-string { color: #a6d189; }
+.jt-bool { color: #ea999c; }
+.jt-number { color: #ffffff; }
+.jt-nested { color: #c6d0f5; }
+</style>`)
+	}
+	
 	// For HTML and Markdown, write directly without extra formatting
 	if format == "html" || format == "markdown" {
 		fmt.Print(output)
@@ -149,7 +171,11 @@ func createTable(buf *bytes.Buffer, format string) *tablewriter.Table {
 	case "markdown":
 		return tablewriter.NewTable(buf, tablewriter.WithRenderer(renderer.NewMarkdown()))
 	case "html":
-		return tablewriter.NewTable(buf, tablewriter.WithRenderer(renderer.NewHTML(renderer.HTMLConfig{EscapeContent: true})))
+		cfg := renderer.HTMLConfig{
+			TableClass:  "jt-table",
+			EscapeContent: false,
+		}
+		return tablewriter.NewTable(buf, tablewriter.WithRenderer(renderer.NewHTML(cfg)))
 	case "svg":
 		return tablewriter.NewTable(buf, tablewriter.WithRenderer(renderer.NewSVG()))
 	default: // table
@@ -188,10 +214,31 @@ func truncateValue(s string, maxWidth int) string {
 func formatValue(val interface{}, details bool, format string, maxWidth int) string {
 	switch v := val.(type) {
 	case map[string]interface{}, []interface{}:
-		return renderRecursive(val, details, format, maxWidth)
+		nested := renderRecursive(val, details, format, maxWidth)
+		// For HTML, ensure nested table stays as single value (no newlines that could split it)
+		if format == "html" {
+			// Remove newlines to keep nested table in one cell
+			nested = strings.ReplaceAll(nested, "\n", "")
+			return nested
+		}
+		return nested
 	default:
-		return truncateValue(fmt.Sprintf("%v", v), maxWidth)
+		value := fmt.Sprintf("%v", v)
+		// Escape HTML entities for primitive values in HTML format
+		if format == "html" {
+			value = escapeHTML(value)
+		}
+		return truncateValue(value, maxWidth)
 	}
+}
+
+func escapeHTML(s string) string {
+	s = strings.ReplaceAll(s, "&", "&amp;")
+	s = strings.ReplaceAll(s, "<", "&lt;")
+	s = strings.ReplaceAll(s, ">", "&gt;")
+	s = strings.ReplaceAll(s, "\"", "&quot;")
+	s = strings.ReplaceAll(s, "'", "&#39;")
+	return s
 }
 
 func appendData(table *tablewriter.Table, data interface{}, details bool, format string, maxWidth int) {
@@ -214,7 +261,7 @@ func appendData(table *tablewriter.Table, data interface{}, details bool, format
 		for _, key := range keys {
 			val := v[key]
 			value := formatValue(val, details, format, maxWidth)
-			appendRow(table, key, value, val, useColor)
+			appendRow(table, key, value, val, useColor, format)
 		}
 	case []interface{}:
 		if details {
@@ -222,22 +269,44 @@ func appendData(table *tablewriter.Table, data interface{}, details bool, format
 		}
 		for i, item := range v {
 			value := formatValue(item, details, format, maxWidth)
-			appendRow(table, fmt.Sprintf("%d", i), value, item, useColor)
+			appendRow(table, fmt.Sprintf("%d", i), value, item, useColor, format)
 		}
 	default:
 		fmt.Println(data)
 	}
 }
 
-func appendRow(table *tablewriter.Table, key, value string, originalVal interface{}, useColor bool) {
+func appendRow(table *tablewriter.Table, key, value string, originalVal interface{}, useColor bool, format string) {
 	if useColor {
 		table.Append([]string{
 			keyStyle.Render(key),
 			getStyle(originalVal).Render(value),
 		})
+	} else if format == "html" {
+		// Add color styling via CSS classes for HTML output
+		cssClass := getHTMLClass(originalVal)
+		
+		styledKey := fmt.Sprintf(`<span class="jt-key">%s</span>`, key)
+		styledValue := fmt.Sprintf(`<span class="%s">%s</span>`, cssClass, value)
+		
+		table.Append([]string{styledKey, styledValue})
 	} else {
 		table.Append([]string{key, value})
 	}
+}
+
+func getHTMLClass(val interface{}) string {
+	switch val.(type) {
+	case bool:
+		return "jt-bool"
+	case string:
+		return "jt-string"
+	case int, int64, float64:
+		return "jt-number"
+	case map[string]interface{}, []interface{}:
+		return "jt-nested"
+	}
+	return "jt-key"
 }
 
 func getStyle(val interface{}) lipgloss.Style {
