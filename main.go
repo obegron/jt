@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -24,35 +25,44 @@ var (
 	intStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
 )
 
+const maxValueWidth = 80
+
 func main() {
 	format := flag.String("format", "table", "Output format (table, markdown, html, svg)")
 	details := flag.Bool("d", false, "Show details (caption)")
+	maxWidth := flag.Int("w", maxValueWidth, "Maximum width for values")
 	flag.Parse()
 
+	input, selector := readInput()
+	data := parseInput(input)
+	data = applySelector(data, selector)
+	
+	render(data, *format, *details, *maxWidth)
+}
+
+func readInput() ([]byte, string) {
+	args := flag.Args()
 	var input []byte
 	var err error
 	var selector string
 
-	args := flag.Args()
 	if len(args) == 0 || (len(args) == 1 && strings.HasPrefix(args[0], ".")) {
-		// Read from stdin
 		info, err := os.Stdin.Stat()
 		if err != nil {
-			fmt.Println("Error reading from stdin:", err)
+			fmt.Fprintln(os.Stderr, "Error reading from stdin:", err)
 			os.Exit(1)
 		}
 		if (info.Mode() & os.ModeCharDevice) == 0 {
 			input, err = io.ReadAll(os.Stdin)
 			if err != nil {
-				fmt.Println("Error reading from stdin:", err)
+				fmt.Fprintln(os.Stderr, "Error reading from stdin:", err)
 				os.Exit(1)
 			}
 		}
 	} else {
-		// Read from file
 		input, err = os.ReadFile(args[0])
 		if err != nil {
-			fmt.Println("Error reading file:", err)
+			fmt.Fprintln(os.Stderr, "Error reading file:", err)
 			os.Exit(1)
 		}
 	}
@@ -64,49 +74,86 @@ func main() {
 	}
 
 	if len(input) == 0 {
-		fmt.Println("Usage: cat data.json | jt [selector]")
-		fmt.Println("       jt <file> [selector]")
+		fmt.Fprintln(os.Stderr, "Usage: cat data.json | jt [selector]")
+		fmt.Fprintln(os.Stderr, "       jt <file> [selector]")
 		os.Exit(1)
 	}
 
+	return input, selector
+}
+
+func parseInput(input []byte) interface{} {
 	var data interface{}
 	if err := json.Unmarshal(input, &data); err != nil {
 		if err := yaml.Unmarshal(input, &data); err != nil {
-			fmt.Println("Error: Input is not valid JSON or YAML.")
+			fmt.Fprintln(os.Stderr, "Error: Input is not valid JSON or YAML.")
 			os.Exit(1)
 		}
 	}
+	return data
+}
 
-	// Apply selector
-	if selector != "." {
-		key := strings.TrimPrefix(selector, ".")
-		if m, ok := data.(map[string]interface{}); ok {
-			if val, exists := m[key]; exists {
-				data = val
-			} else {
-				fmt.Printf("Error: key '%s' not found\n", key)
-				os.Exit(1)
-			}
-		} else {
-			fmt.Println("Error: selector can only be applied to a map.")
-			os.Exit(1)
-		}
+func applySelector(data interface{}, selector string) interface{} {
+	if selector == "." {
+		return data
 	}
 
-	render(data, *format, *details)
+	// Split the selector path (e.g., ".nested.key1" -> ["nested", "key1"])
+	path := strings.Split(strings.TrimPrefix(selector, "."), ".")
+	
+	current := data
+	for i, key := range path {
+		m, ok := current.(map[string]interface{})
+		if !ok {
+			fmt.Fprintf(os.Stderr, "Error: cannot traverse into non-object at path '%s'\n", 
+				strings.Join(path[:i], "."))
+			os.Exit(1)
+		}
+
+		val, exists := m[key]
+		if !exists {
+			fmt.Fprintf(os.Stderr, "Error: key '%s' not found in path '%s'\n", 
+				key, strings.Join(path[:i+1], "."))
+			os.Exit(1)
+		}
+		
+		current = val
+	}
+
+	return current
 }
 
-func render(data interface{}, format string, details bool) {
-	fmt.Println(renderRecursive(data, true, details, format))
+func render(data interface{}, format string, details bool, maxWidth int) {
+	output := renderRecursive(data, details, format, maxWidth)
+	
+	// For HTML and Markdown, write directly without extra formatting
+	if format == "html" || format == "markdown" {
+		fmt.Print(output)
+	} else {
+		fmt.Println(output)
+	}
 }
 
-func renderRecursive(data interface{}, isRoot bool, details bool, format string) string {
+func renderRecursive(data interface{}, details bool, format string, maxWidth int) string {
 	var buf bytes.Buffer
-	var table *tablewriter.Table
+	table := createTable(&buf, format)
+	
+	appendData(table, data, details, format, maxWidth)
+	table.Render()
+	
+	return buf.String()
+}
 
+func createTable(buf *bytes.Buffer, format string) *tablewriter.Table {
 	switch format {
-	case "table":
-		table = tablewriter.NewTable(&buf,
+	case "markdown":
+		return tablewriter.NewTable(buf, tablewriter.WithRenderer(renderer.NewMarkdown()))
+	case "html":
+		return tablewriter.NewTable(buf, tablewriter.WithRenderer(renderer.NewHTML(renderer.HTMLConfig{EscapeContent: true})))
+	case "svg":
+		return tablewriter.NewTable(buf, tablewriter.WithRenderer(renderer.NewSVG()))
+	default: // table
+		return tablewriter.NewTable(buf,
 			tablewriter.WithHeaderAlignment(tw.AlignLeft),
 			tablewriter.WithRowAlignment(tw.AlignLeft),
 			tablewriter.WithRendition(tw.Rendition{
@@ -116,17 +163,81 @@ func renderRecursive(data interface{}, isRoot bool, details bool, format string)
 				},
 			}),
 		)
-	case "markdown":
-		table = tablewriter.NewTable(&buf, tablewriter.WithRenderer(renderer.NewMarkdown()))
-	case "html":
-		table = tablewriter.NewTable(&buf, tablewriter.WithRenderer(renderer.NewHTML(renderer.HTMLConfig{EscapeContent: true})))
-	case "svg":
-		table = tablewriter.NewTable(&buf, tablewriter.WithRenderer(renderer.NewSVG()))
 	}
+}
 
-	appendData(table, data, true, details, format)
-	table.Render()
-	return buf.String()
+func truncateValue(s string, maxWidth int) string {
+	// Replace newlines with spaces for single-line display
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
+	
+	// Collapse multiple spaces
+	for strings.Contains(s, "  ") {
+		s = strings.ReplaceAll(s, "  ", " ")
+	}
+	
+	s = strings.TrimSpace(s)
+	
+	if len(s) <= maxWidth {
+		return s
+	}
+	
+	return s[:maxWidth-3] + "..."
+}
+
+func formatValue(val interface{}, details bool, format string, maxWidth int) string {
+	switch v := val.(type) {
+	case map[string]interface{}, []interface{}:
+		return renderRecursive(val, details, format, maxWidth)
+	default:
+		return truncateValue(fmt.Sprintf("%v", v), maxWidth)
+	}
+}
+
+func appendData(table *tablewriter.Table, data interface{}, details bool, format string, maxWidth int) {
+	isTerminal := isatty.IsTerminal(os.Stdout.Fd())
+	useColor := isTerminal && format == "table"
+
+	switch v := data.(type) {
+	case map[string]interface{}:
+		if details {
+			table.Caption(tw.Caption{Text: fmt.Sprintf("[-] Object, %d properties", len(v))})
+		}
+		
+		// Sort keys for consistent output
+		keys := make([]string, 0, len(v))
+		for key := range v {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		
+		for _, key := range keys {
+			val := v[key]
+			value := formatValue(val, details, format, maxWidth)
+			appendRow(table, key, value, val, useColor)
+		}
+	case []interface{}:
+		if details {
+			table.Caption(tw.Caption{Text: fmt.Sprintf("[-] Array, %d items", len(v))})
+		}
+		for i, item := range v {
+			value := formatValue(item, details, format, maxWidth)
+			appendRow(table, fmt.Sprintf("%d", i), value, item, useColor)
+		}
+	default:
+		fmt.Println(data)
+	}
+}
+
+func appendRow(table *tablewriter.Table, key, value string, originalVal interface{}, useColor bool) {
+	if useColor {
+		table.Append([]string{
+			keyStyle.Render(key),
+			getStyle(originalVal).Render(value),
+		})
+	} else {
+		table.Append([]string{key, value})
+	}
 }
 
 func getStyle(val interface{}) lipgloss.Style {
@@ -135,62 +246,8 @@ func getStyle(val interface{}) lipgloss.Style {
 		return boolStyle
 	case string:
 		return stringStyle
-	case int:
+	case int, int64, float64:
 		return intStyle
 	}
 	return keyStyle
-}
-
-func appendData(table *tablewriter.Table, data interface{}, recursive bool, details bool, format string) {
-	isTerminal := isatty.IsTerminal(os.Stdout.Fd())
-
-	switch v := data.(type) {
-	case map[string]interface{}:
-		if details {
-			table.Caption(tw.Caption{Text: fmt.Sprintf("[-] Object, %d properties", len(v))})
-		}
-		for key, val := range v {
-			value := ""
-			if recursive {
-				switch val.(type) {
-				case map[string]interface{}, []interface{}:
-					value = renderRecursive(val, false, details, format)
-				default:
-					value = fmt.Sprintf("%v", val)
-				}
-			} else {
-				value = fmt.Sprintf("%v", val)
-			}
-			if isTerminal && format == "table" {
-				table.Append([]string{keyStyle.Render(key), getStyle(val).Render(value)})
-			} else {
-				table.Append([]string{key, value})
-			}
-		}
-	case []interface{}:
-		if details {
-			table.Caption(tw.Caption{Text: fmt.Sprintf("[-] Array, %d items", len(v))})
-		}
-		for i, item := range v {
-			value := ""
-			if recursive {
-				switch item.(type) {
-				case map[string]interface{}, []interface{}:
-					value = renderRecursive(item, false, details, format)
-				default:
-					value = fmt.Sprintf("%v", item)
-				}
-			} else {
-				value = fmt.Sprintf("%v", item)
-			}
-			if isTerminal && format == "table" {
-				table.Append([]string{keyStyle.Render(fmt.Sprintf("%d", i)), getStyle(v).Render(value)})
-			} else {
-				table.Append([]string{fmt.Sprintf("%d", i), value})
-			}
-		}
-	default:
-		// For non-map/slice data, just print the value
-		fmt.Println(data)
-	}
 }
