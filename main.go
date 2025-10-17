@@ -242,12 +242,41 @@ func appendData(table *tablewriter.Table, data interface{}, details bool, format
 	useColor := isTerminal && format == "table"
 
 	switch v := data.(type) {
-	case map[string]interface{}:
+	case []interface{}:
 		if details {
-			table.Caption(tw.Caption{Text: fmt.Sprintf("[-] Object, %d properties", len(v))})
+			table.Caption(tw.Caption{Text: fmt.Sprintf("[-] Array data structure, %d items", len(v))})
 		}
 
-		// Sort keys for consistent output
+		// Build header
+		headers := []string{"[key]"}
+		sample := v[0].(map[string]interface{})
+		for key := range sample {
+			headers = append(headers, key)
+		}
+		sort.Strings(headers)
+		table.Header(headers)
+
+		for i, item := range v {
+			m, ok := item.(map[string]interface{})
+			if !ok {
+				table.Append([]string{fmt.Sprintf("%d", i), truncateValue(fmt.Sprintf("%v", item), maxWidth)})
+				continue
+			}
+
+			row := []string{fmt.Sprintf("%d", i)}
+			for _, key := range headers[1:] {
+				val := m[key]
+				value := formatValue(val, details, format, maxWidth)
+				row = append(row, value)
+			}
+			table.Append(row)
+		}
+
+	case map[string]interface{}:
+		if details {
+			table.Caption(tw.Caption{Text: fmt.Sprintf("[-] Object data structure, %d properties", len(v))})
+		}
+
 		keys := make([]string, 0, len(v))
 		for key := range v {
 			keys = append(keys, key)
@@ -259,18 +288,12 @@ func appendData(table *tablewriter.Table, data interface{}, details bool, format
 			value := formatValue(val, details, format, maxWidth)
 			appendRow(table, key, value, val, useColor, format)
 		}
-	case []interface{}:
-		if details {
-			table.Caption(tw.Caption{Text: fmt.Sprintf("[-] Array, %d items", len(v))})
-		}
-		for i, item := range v {
-			value := formatValue(item, details, format, maxWidth)
-			appendRow(table, fmt.Sprintf("%d", i), value, item, useColor, format)
-		}
+
 	default:
-		fmt.Println(data)
+		table.Append([]string{"value", truncateValue(fmt.Sprintf("%v", v), maxWidth)})
 	}
 }
+
 
 func appendRow(table *tablewriter.Table, key, value string, originalVal interface{}, useColor bool, format string) {
 	if useColor {
