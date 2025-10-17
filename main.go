@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/mattn/go-isatty"
 	"github.com/olekukonko/tablewriter"
 	"github.com/olekukonko/tablewriter/renderer"
 	"github.com/olekukonko/tablewriter/tw"
@@ -39,6 +38,14 @@ func main() {
 	data = applySelector(data, selector)
 
 	render(data, *format, *details, *maxWidth)
+}
+
+func isTerminal() bool {
+	info, err := os.Stdout.Stat()
+	if err != nil {
+		return false
+	}
+	return (info.Mode() & os.ModeCharDevice) != 0
 }
 
 func readInput() ([]byte, string) {
@@ -245,8 +252,7 @@ func escapeHTML(s string) string {
 }
 
 func appendData(table *tablewriter.Table, data interface{}, details bool, format string, maxWidth int) {
-	isTerminal := isatty.IsTerminal(os.Stdout.Fd())
-	useColor := isTerminal && format == "table"
+	useColor := isTerminal() && format == "table"
 
 	switch v := data.(type) {
 	case []interface{}:
