@@ -244,45 +244,61 @@ func appendData(table *tablewriter.Table, data interface{}, details bool, format
 	switch v := data.(type) {
 	case []interface{}:
 		if details {
-			table.Caption(tw.Caption{Text: fmt.Sprintf("[-] Array data structure, %d items", len(v))})
+			table.Caption(tw.Caption{Text: fmt.Sprintf("[-] array, %d items", len(v))})
+		}
+		if len(v) == 0 {
+			return
 		}
 
-		// Build header
+		// Build header row
 		headers := []string{"[key]"}
-		sample := v[0].(map[string]interface{})
-		for key := range sample {
-			headers = append(headers, key)
+		if first, ok := v[0].(map[string]interface{}); ok {
+			keys := make([]string, 0, len(first))
+			for k := range first {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			headers = append(headers, keys...)
 		}
-		sort.Strings(headers)
 		table.Header(headers)
 
 		for i, item := range v {
-			m, ok := item.(map[string]interface{})
-			if !ok {
-				table.Append([]string{fmt.Sprintf("%d", i), truncateValue(fmt.Sprintf("%v", item), maxWidth)})
-				continue
-			}
+			if m, ok := item.(map[string]interface{}); ok {
+				row := []string{fmt.Sprintf("%d", i)}
+				for _, key := range headers[1:] {
+					val := m[key]
+					value := formatValue(val, details, format, maxWidth)
 
-			row := []string{fmt.Sprintf("%d", i)}
-			for _, key := range headers[1:] {
-				val := m[key]
-				value := formatValue(val, details, format, maxWidth)
-				row = append(row, value)
+					if useColor {
+						row = append(row, getStyle(val).Render(value))
+					} else if format == "html" {
+						class := getHTMLClass(val)
+						row = append(row, fmt.Sprintf(`<span class="%s">%s</span>`, class, value))
+					} else {
+						row = append(row, value)
+					}
+				}
+				if useColor {
+					row[0] = keyStyle.Render(row[0])
+				} else if format == "html" {
+					row[0] = fmt.Sprintf(`<span class="jt-key">%s</span>`, row[0])
+				}
+				table.Append(row)
+			} else {
+				value := formatValue(item, details, format, maxWidth)
+				appendRow(table, fmt.Sprintf("%d", i), value, item, useColor, format)
 			}
-			table.Append(row)
 		}
 
 	case map[string]interface{}:
 		if details {
-			table.Caption(tw.Caption{Text: fmt.Sprintf("[-] Object data structure, %d properties", len(v))})
+			table.Caption(tw.Caption{Text: fmt.Sprintf("[-] object, %d properties", len(v))})
 		}
-
 		keys := make([]string, 0, len(v))
-		for key := range v {
-			keys = append(keys, key)
+		for k := range v {
+			keys = append(keys, k)
 		}
 		sort.Strings(keys)
-
 		for _, key := range keys {
 			val := v[key]
 			value := formatValue(val, details, format, maxWidth)
@@ -293,6 +309,7 @@ func appendData(table *tablewriter.Table, data interface{}, details bool, format
 		table.Append([]string{"value", truncateValue(fmt.Sprintf("%v", v), maxWidth)})
 	}
 }
+
 
 
 func appendRow(table *tablewriter.Table, key, value string, originalVal interface{}, useColor bool, format string) {
