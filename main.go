@@ -168,16 +168,12 @@ func renderRecursive(data interface{}, details bool, format string, maxWidth int
 
 func createTable(buf *bytes.Buffer, format string) *tablewriter.Table {
 	switch format {
-	case "markdown":
-		return tablewriter.NewTable(buf, tablewriter.WithRenderer(renderer.NewMarkdown()))
 	case "html":
 		cfg := renderer.HTMLConfig{
 			TableClass:    "jt-table",
 			EscapeContent: false,
 		}
 		return tablewriter.NewTable(buf, tablewriter.WithRenderer(renderer.NewHTML(cfg)))
-	case "svg":
-		return tablewriter.NewTable(buf, tablewriter.WithRenderer(renderer.NewSVG()))
 	default: // table
 		return tablewriter.NewTable(buf,
 			tablewriter.WithHeaderAlignment(tw.AlignLeft),
