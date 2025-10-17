@@ -133,7 +133,7 @@ func render(data interface{}, format string, details bool, maxWidth int) {
 	border-collapse: collapse;
 	background-color: #303446;
 	border: 1px solid #414559;
-	margin: 5px;
+	margin: 2px;
 }
 .jt-table td {
 	border: 1px solid #414559;
