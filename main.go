@@ -19,6 +19,7 @@ import (
 )
 
 var (
+	headerStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#ca9ee6"));
 	keyStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#c6d0f5"))
 	stringStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#a6d189"))
 	boolStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#ea999c"))
@@ -135,6 +136,11 @@ func render(data interface{}, format string, details bool, maxWidth int) {
 	border: 1px solid #414559;
 	margin: 2px;
 }
+.jt-table th {
+	text-align: center;
+	color: #ca9ee6;
+	font-weight: bold;
+}
 .jt-table td {
 	border: 1px solid #414559;
 	padding: 8px;
@@ -170,6 +176,7 @@ func createTable(buf *bytes.Buffer, format string) *tablewriter.Table {
 	switch format {
 	case "html":
 		cfg := renderer.HTMLConfig{
+			HeaderClass:    "jt-header",
 			TableClass:    "jt-table",
 			EscapeContent: false,
 		}
@@ -309,8 +316,6 @@ func appendData(table *tablewriter.Table, data interface{}, details bool, format
 		table.Append([]string{"value", truncateValue(fmt.Sprintf("%v", v), maxWidth)})
 	}
 }
-
-
 
 func appendRow(table *tablewriter.Table, key, value string, originalVal interface{}, useColor bool, format string) {
 	if useColor {
