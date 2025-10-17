@@ -10,22 +10,206 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/olekukonko/tablewriter"
 	"github.com/olekukonko/tablewriter/renderer"
 	"github.com/olekukonko/tablewriter/tw"
+	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 )
 
 var (
-	headerStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#ca9ee6"));
+	headerStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#ca9ee6"))
 	keyStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#c6d0f5"))
 	stringStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#a6d189"))
 	boolStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#ea999c"))
 	intStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
+
+	statusBarStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#c6d0f5")).
+			Background(lipgloss.Color("#414559")).
+			Padding(0, 1)
 )
 
 const maxValueWidth = 80
+
+type model struct {
+	viewport     viewport.Model
+	content      []string // lines of content
+	ready        bool
+	contentWidth int
+	xOffset      int
+	width        int
+	height       int
+}
+
+func (m model) Init() tea.Cmd {
+	return nil
+}
+
+func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "q", "ctrl+c", "esc":
+			return m, tea.Quit
+		case "h", "left":
+			if m.xOffset > 0 {
+				m.xOffset -= 5
+				if m.xOffset < 0 {
+					m.xOffset = 0
+				}
+				m.updateViewportContent()
+			}
+		case "l", "right":
+			maxScroll := m.contentWidth - m.width
+			if maxScroll > 0 && m.xOffset < maxScroll {
+				m.xOffset += 5
+				if m.xOffset > maxScroll {
+					m.xOffset = maxScroll
+				}
+				m.updateViewportContent()
+			}
+		case "g", "home":
+			m.viewport.GotoTop()
+			m.xOffset = 0
+			m.updateViewportContent()
+		case "G", "end":
+			m.viewport.GotoBottom()
+		case "0":
+			m.xOffset = 0
+			m.updateViewportContent()
+		case "$":
+			maxScroll := m.contentWidth - m.width
+			if maxScroll > 0 {
+				m.xOffset = maxScroll
+				m.updateViewportContent()
+			}
+		default:
+			// Pass other keys to viewport for vertical scrolling
+			m.viewport, cmd = m.viewport.Update(msg)
+			return m, cmd
+		}
+
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		
+		if !m.ready {
+			m.viewport = viewport.New(msg.Width, msg.Height-1)
+			m.updateViewportContent()
+			m.ready = true
+		} else {
+			m.viewport.Width = msg.Width
+			m.viewport.Height = msg.Height - 1
+			m.updateViewportContent()
+		}
+		return m, nil
+	}
+
+	m.viewport, cmd = m.viewport.Update(msg)
+	return m, cmd
+}
+
+func (m *model) updateViewportContent() {
+	// Slice each line horizontally based on xOffset
+	visibleLines := make([]string, len(m.content))
+	for i, line := range m.content {
+		visibleLines[i] = sliceLine(line, m.xOffset, m.width)
+	}
+	m.viewport.SetContent(strings.Join(visibleLines, "\n"))
+}
+
+func sliceLine(line string, offset, width int) string {
+	// Use lipgloss.Width for accurate width calculation
+	lineWidth := lipgloss.Width(line)
+	
+	// If line fits entirely, return as-is
+	if offset == 0 && lineWidth <= width {
+		return line
+	}
+	
+	// If offset is beyond line length, return empty
+	if offset >= lineWidth {
+		return ""
+	}
+	
+	// Extract the visible portion using rune-based slicing
+	runes := []rune(line)
+	var result strings.Builder
+	var ansiBuffer strings.Builder
+	inAnsi := false
+	visiblePos := 0
+	writtenChars := 0
+	
+	for i := 0; i < len(runes); i++ {
+		r := runes[i]
+		
+		// Detect ANSI escape sequence start
+		if r == '\x1b' {
+			inAnsi = true
+			ansiBuffer.WriteRune(r)
+			continue
+		}
+		
+		// Continue collecting ANSI sequence
+		if inAnsi {
+			ansiBuffer.WriteRune(r)
+			// ANSI sequence ends with a letter
+			if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') {
+				// Write the complete ANSI sequence
+				result.WriteString(ansiBuffer.String())
+				ansiBuffer.Reset()
+				inAnsi = false
+			}
+			continue
+		}
+		
+		// Handle visible character
+		if visiblePos >= offset && writtenChars < width {
+			result.WriteRune(r)
+			writtenChars++
+		}
+		visiblePos++
+		
+		if writtenChars >= width {
+			break
+		}
+	}
+	
+	// Add any remaining ANSI codes
+	if ansiBuffer.Len() > 0 {
+		result.WriteString(ansiBuffer.String())
+	}
+	
+	return result.String()
+}
+
+func (m model) View() string {
+	if !m.ready {
+		return "Initializing..."
+	}
+
+	// Calculate visible range
+	maxHScroll := m.contentWidth - m.width
+	if maxHScroll < 0 {
+		maxHScroll = 0
+	}
+
+	statusBar := statusBarStyle.Render(fmt.Sprintf(
+		"↑↓/kj: vertical | ←→/hl: horizontal | g/G: top/bottom | 0/$: left/right | q: quit | Line: %d/%d | Col: %d/%d",
+		m.viewport.YOffset+1,
+		len(m.content),
+		m.xOffset+1,
+		m.contentWidth,
+	))
+
+	return m.viewport.View() + "\n" + statusBar
+}
 
 func main() {
 	format := flag.String("format", "table", "Output format table/html")
@@ -46,6 +230,27 @@ func isTerminal() bool {
 		return false
 	}
 	return (info.Mode() & os.ModeCharDevice) != 0
+}
+
+func getTerminalWidth() int {
+	width, _, err := term.GetSize(int(os.Stdout.Fd()))
+	if err != nil {
+		return 80 // default fallback
+	}
+	return width
+}
+
+func getContentWidth(content string) int {
+	maxWidth := 0
+	lines := strings.Split(content, "\n")
+	for _, line := range lines {
+		// Use lipgloss.Width for accurate width calculation
+		width := lipgloss.Width(line)
+		if width > maxWidth {
+			maxWidth = width
+		}
+	}
+	return maxWidth
 }
 
 func readInput() ([]byte, string) {
@@ -159,14 +364,34 @@ func render(data interface{}, format string, details bool, maxWidth int) {
 .jt-number { color: #ffffff; }
 .jt-nested { color: #c6d0f5; }
 </style>`)
+		fmt.Print(output)
+		return
 	}
 
-	// For HTML and Markdown, write directly without extra formatting
-	if format == "html" {
-		fmt.Print(output)
-	} else {
-		fmt.Println(output)
+	// Check if we should use interactive viewer
+	if format == "table" && isTerminal() {
+		termWidth := getTerminalWidth()
+		contentWidth := getContentWidth(output)
+
+		// Use interactive viewer if content is wider than terminal
+		if contentWidth > termWidth {
+			lines := strings.Split(output, "\n")
+			m := model{
+				content:      lines,
+				contentWidth: contentWidth,
+			}
+			p := tea.NewProgram(m, tea.WithAltScreen())
+			if _, err := p.Run(); err != nil {
+				fmt.Fprintf(os.Stderr, "Error running interactive viewer: %v\n", err)
+				// Fallback to regular output
+				fmt.Println(output)
+			}
+			return
+		}
 	}
+
+	// Regular output for non-interactive cases
+	fmt.Println(output)
 }
 
 func renderRecursive(data interface{}, details bool, format string, maxWidth int) string {
@@ -183,7 +408,7 @@ func createTable(buf *bytes.Buffer, format string) *tablewriter.Table {
 	switch format {
 	case "html":
 		cfg := renderer.HTMLConfig{
-			HeaderClass:    "jt-header",
+			HeaderClass:   "jt-header",
 			TableClass:    "jt-table",
 			EscapeContent: false,
 		}
