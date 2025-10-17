@@ -10,17 +10,18 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-isatty"
 	"github.com/olekukonko/tablewriter"
 	"github.com/olekukonko/tablewriter/renderer"
 	"github.com/olekukonko/tablewriter/tw"
 	"gopkg.in/yaml.v3"
-	"github.com/mattn/go-isatty"
 )
 
 var (
-	headerStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212"))
-	keyStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("7"))
-	valueStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
+	keyStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#c6d0f5"))
+	stringStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#a6d189"))
+	boolStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#ea999c"))
+	intStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
 )
 
 func main() {
@@ -117,18 +118,27 @@ func renderRecursive(data interface{}, isRoot bool, details bool, format string)
 		)
 	case "markdown":
 		table = tablewriter.NewTable(&buf, tablewriter.WithRenderer(renderer.NewMarkdown()))
-		table.Header([]string{"Key", "Value"})
 	case "html":
 		table = tablewriter.NewTable(&buf, tablewriter.WithRenderer(renderer.NewHTML(renderer.HTMLConfig{EscapeContent: true})))
-		table.Header([]string{"Key", "Value"})
 	case "svg":
 		table = tablewriter.NewTable(&buf, tablewriter.WithRenderer(renderer.NewSVG()))
-		table.Header([]string{"Key", "Value"})
 	}
 
 	appendData(table, data, true, details, format)
 	table.Render()
 	return buf.String()
+}
+
+func getStyle(val interface{}) lipgloss.Style {
+	switch val.(type) {
+	case bool:
+		return boolStyle
+	case string:
+		return stringStyle
+	case int:
+		return intStyle
+	}
+	return keyStyle
 }
 
 func appendData(table *tablewriter.Table, data interface{}, recursive bool, details bool, format string) {
@@ -152,7 +162,7 @@ func appendData(table *tablewriter.Table, data interface{}, recursive bool, deta
 				value = fmt.Sprintf("%v", val)
 			}
 			if isTerminal && format == "table" {
-				table.Append([]string{keyStyle.Render(key), valueStyle.Render(value)})
+				table.Append([]string{keyStyle.Render(key), getStyle(val).Render(value)})
 			} else {
 				table.Append([]string{key, value})
 			}
@@ -174,7 +184,7 @@ func appendData(table *tablewriter.Table, data interface{}, recursive bool, deta
 				value = fmt.Sprintf("%v", item)
 			}
 			if isTerminal && format == "table" {
-				table.Append([]string{keyStyle.Render(fmt.Sprintf("%d", i)), valueStyle.Render(value)})
+				table.Append([]string{keyStyle.Render(fmt.Sprintf("%d", i)), getStyle(v).Render(value)})
 			} else {
 				table.Append([]string{fmt.Sprintf("%d", i), value})
 			}
@@ -184,4 +194,3 @@ func appendData(table *tablewriter.Table, data interface{}, recursive bool, deta
 		fmt.Println(data)
 	}
 }
-
