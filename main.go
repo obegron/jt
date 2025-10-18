@@ -145,39 +145,86 @@ func getContentWidth(content string) int {
 func readInput() ([]byte, string) {
 	args := flag.Args()
 	var input []byte
-	var err error
 	var selector string
+	var err error
 
-	if len(args) == 0 || (len(args) == 1 && strings.HasPrefix(args[0], ".")) {
-		info, err := os.Stdin.Stat()
+	// Check if stdin has data (is being piped to)
+	stdinHasData := false
+	if stat, err := os.Stdin.Stat(); err == nil {
+		stdinHasData = (stat.Mode() & os.ModeCharDevice) == 0
+	}
+
+	// Helper function to check if a path is a file
+	isFile := func(path string) bool {
+		info, err := os.Stat(path)
+		return err == nil && !info.IsDir()
+	}
+
+	// Helper function to check if arg looks like a selector
+	// Selectors are: "." or start with "." followed by a letter/bracket
+	isSelector := func(s string) bool {
+		if s == "." {
+			return true
+		}
+		if len(s) >= 2 && s[0] == '.' && (s[1] >= 'a' && s[1] <= 'z' || s[1] >= 'A' && s[1] <= 'Z' || s[1] == '[') {
+			return true
+		}
+		return false
+	}
+
+	// Determine if we're reading from stdin or file
+	if len(args) == 0 {
+		// No args: must read from stdin
+		if !stdinHasData {
+			fmt.Fprintln(os.Stderr, "Usage: cat data.json | jt [selector]")
+			fmt.Fprintln(os.Stderr, "       jt <file> [selector]")
+			os.Exit(1)
+		}
+		input, err = io.ReadAll(os.Stdin)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "Error reading from stdin:", err)
 			os.Exit(1)
 		}
-		if (info.Mode() & os.ModeCharDevice) == 0 {
+		selector = "."
+	} else if len(args) == 1 {
+		// One arg: check if it's a file first, otherwise treat as selector
+		if isFile(args[0]) {
+			// It's a file
+			input, err = os.ReadFile(args[0])
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "Error reading file:", err)
+				os.Exit(1)
+			}
+			selector = "."
+		} else if isSelector(args[0]) {
+			// It's a selector, read from stdin
+			if !stdinHasData {
+				fmt.Fprintln(os.Stderr, "Error: selector provided but no data piped to stdin")
+				os.Exit(1)
+			}
 			input, err = io.ReadAll(os.Stdin)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "Error reading from stdin:", err)
 				os.Exit(1)
 			}
+			selector = args[0]
+		} else {
+			// Not a file and not a selector - assume it's a file path that doesn't exist
+			fmt.Fprintf(os.Stderr, "Error: file not found: %s\n", args[0])
+			os.Exit(1)
 		}
 	} else {
+		// Two or more args: first is file, second is selector
 		input, err = os.ReadFile(args[0])
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "Error reading file:", err)
 			os.Exit(1)
 		}
-	}
-
-	if len(args) > 0 && strings.HasPrefix(args[len(args)-1], ".") {
-		selector = args[len(args)-1]
-	} else {
-		selector = "."
+		selector = args[1]
 	}
 
 	if len(input) == 0 {
-		fmt.Fprintln(os.Stderr, "Usage: cat data.json | jt [selector]")
-		fmt.Fprintln(os.Stderr, "       jt <file> [selector]")
+		fmt.Fprintln(os.Stderr, "Error: no data to process")
 		os.Exit(1)
 	}
 
