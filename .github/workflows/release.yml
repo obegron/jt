@@ -57,9 +57,4 @@ jobs:
       - name: Release
         uses: softprops/action-gh-release@v1
         with:
-          files: |
-            artifacts/jt-linux-amd64/jt
-            artifacts/jt-linux-arm64/jt
-            artifacts/jt-darwin-arm64/jt
-            artifacts/jt-windows-amd64/jt.exe
-            artifacts/jt-windows-arm64/jt.exe
+          files: artifacts/*/*
