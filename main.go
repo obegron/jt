@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -199,26 +200,56 @@ func applySelector(data interface{}, selector string) interface{} {
 		return data
 	}
 
-	// Split the selector path (e.g., ".nested.key1" -> ["nested", "key1"])
-	path := strings.Split(strings.TrimPrefix(selector, "."), ".")
+	// Normalize selector to handle array indexing
+	selector = strings.ReplaceAll(strings.TrimPrefix(selector, "."), "[", ".[")
+	path := strings.Split(selector, ".")
 
 	current := data
-	for i, key := range path {
-		m, ok := current.(map[string]interface{})
-		if !ok {
-			fmt.Fprintf(os.Stderr, "Error: cannot traverse into non-object at path '%s'",
-				strings.Join(path[:i], "."))
-			os.Exit(1)
+	fullPath := ""
+	for _, key := range path {
+		if key == "" {
+			continue
 		}
 
-		val, exists := m[key]
-		if !exists {
-			fmt.Fprintf(os.Stderr, "Error: key '%s' not found in path '%s'",
-				key, strings.Join(path[:i+1], "."))
-			os.Exit(1)
+		if fullPath == "" {
+			fullPath = key
+		} else {
+			fullPath += "." + key
 		}
 
-		current = val
+		if strings.HasPrefix(key, "[") && strings.HasSuffix(key, "]") {
+			indexStr := strings.Trim(key, "[]")
+			index, err := strconv.Atoi(indexStr)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: invalid array index '%s' in path '%s'\n", indexStr, fullPath)
+				os.Exit(1)
+			}
+
+			arr, ok := current.([]interface{})
+			if !ok {
+				fmt.Fprintf(os.Stderr, "Error: cannot index into non-array at path '%s'\n", fullPath)
+				os.Exit(1)
+			}
+
+			if index < 0 || index >= len(arr) {
+				fmt.Fprintf(os.Stderr, "Error: index %d out of bounds for array at path '%s'\n", index, fullPath)
+				os.Exit(1)
+			}
+			current = arr[index]
+		} else {
+			m, ok := current.(map[string]interface{})
+			if !ok {
+				fmt.Fprintf(os.Stderr, "Error: cannot traverse into non-object at path '%s'\n", fullPath)
+				os.Exit(1)
+			}
+
+			val, exists := m[key]
+			if !exists {
+				fmt.Fprintf(os.Stderr, "Error: key '%s' not found in path '%s'\n", key, fullPath)
+				os.Exit(1)
+			}
+			current = val
+		}
 	}
 
 	return current
