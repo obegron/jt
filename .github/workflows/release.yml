@@ -40,8 +40,8 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: release-assets
-          path: jt-*
+          name: ${{ matrix.goos }}-${{ matrix.goarch }}
+          path: jt-${{ matrix.goos }}-${{ matrix.goarch }}*
 
   release:
     name: Release
@@ -63,11 +63,10 @@ jobs:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          name: release-assets
           path: artifacts
       - name: Upload Release Assets
         uses: softprops/action-gh-release@v1
         with:
-          files: artifacts/*
+          files: artifacts/*/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
