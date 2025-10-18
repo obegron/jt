@@ -10,8 +10,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/olekukonko/tablewriter"
 	"github.com/olekukonko/tablewriter/renderer"
@@ -52,37 +53,34 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "q", "ctrl+c", "esc":
-			return m, tea.Quit
-		case "g", "home":
-			m.viewport.GotoTop()
-		case "G", "end":
-			m.viewport.GotoBottom()
-		default:
-			// Pass all other keys to the viewport for scrolling
-			m.viewport, cmd = m.viewport.Update(msg)
-			return m, cmd
-		}
-
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-
 		if !m.ready {
 			m.viewport = viewport.New(msg.Width, msg.Height-1)
-			// Set the content once
 			m.viewport.SetContent(strings.Join(m.content, "\n"))
 			m.ready = true
 		} else {
 			m.viewport.Width = msg.Width
 			m.viewport.Height = msg.Height - 1
 		}
-		return m, nil
+
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "q", "ctrl+c", "esc":
+			return m, tea.Quit
+		case "l", "right":
+			m.viewport.ScrollRight(5)
+		case "h", "left":
+			m.viewport.ScrollLeft(5)
+		case "g", "home":
+			m.viewport.GotoTop()
+		case "G", "end":
+			m.viewport.GotoBottom()
+		}
 	}
 
-	// Also pass any other messages to the viewport
+	// Pass all messages to the viewport for scrolling, etc.
 	m.viewport, cmd = m.viewport.Update(msg)
 	return m, cmd
 }
@@ -93,7 +91,7 @@ func (m model) View() string {
 	}
 
 	statusBar := statusBarStyle.Render(fmt.Sprintf(
-		"↑↓/kj: vertical | ←→/hl: horizontal | g/G: top/bottom | q: quit | Line: %d/%d",
+		"↑↓/kj: vertical | ←→/hl: horizontal | g/G: jump | q: quit | Line: %d/%d",
 		m.viewport.YOffset+1,
 		len(m.content),
 	))
@@ -320,7 +318,7 @@ func createTable(buf *bytes.Buffer, format string) *tablewriter.Table {
 func truncateValue(s string, maxWidth int) string {
 	// Replace newlines with spaces for single-line display
 	s = strings.ReplaceAll(s, "\n", " ")
-	s = strings.ReplaceAll(s, "", " ")
+	s = strings.ReplaceAll(s, "\r", "")
 
 	// Collapse multiple spaces
 	for strings.Contains(s, "  ") {
