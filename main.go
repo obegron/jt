@@ -40,7 +40,6 @@ type model struct {
 	content      []string // lines of content
 	ready        bool
 	contentWidth int
-	xOffset      int
 	width        int
 	height       int
 }
@@ -57,40 +56,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "q", "ctrl+c", "esc":
 			return m, tea.Quit
-		case "h", "left":
-			if m.xOffset > 0 {
-				m.xOffset -= 5
-				if m.xOffset < 0 {
-					m.xOffset = 0
-				}
-				m.updateViewportContent()
-			}
-		case "l", "right":
-			maxScroll := m.contentWidth - m.width
-			if maxScroll > 0 && m.xOffset < maxScroll {
-				m.xOffset += 5
-				if m.xOffset > maxScroll {
-					m.xOffset = maxScroll
-				}
-				m.updateViewportContent()
-			}
 		case "g", "home":
 			m.viewport.GotoTop()
-			m.xOffset = 0
-			m.updateViewportContent()
 		case "G", "end":
 			m.viewport.GotoBottom()
-		case "0":
-			m.xOffset = 0
-			m.updateViewportContent()
-		case "$":
-			maxScroll := m.contentWidth - m.width
-			if maxScroll > 0 {
-				m.xOffset = maxScroll
-				m.updateViewportContent()
-			}
 		default:
-			// Pass other keys to viewport for vertical scrolling
+			// Pass all other keys to the viewport for scrolling
 			m.viewport, cmd = m.viewport.Update(msg)
 			return m, cmd
 		}
@@ -98,95 +69,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		
+
 		if !m.ready {
 			m.viewport = viewport.New(msg.Width, msg.Height-1)
-			m.updateViewportContent()
+			// Set the content once
+			m.viewport.SetContent(strings.Join(m.content, "\n"))
 			m.ready = true
 		} else {
 			m.viewport.Width = msg.Width
 			m.viewport.Height = msg.Height - 1
-			m.updateViewportContent()
 		}
 		return m, nil
 	}
 
+	// Also pass any other messages to the viewport
 	m.viewport, cmd = m.viewport.Update(msg)
 	return m, cmd
-}
-
-func (m *model) updateViewportContent() {
-	// Slice each line horizontally based on xOffset
-	visibleLines := make([]string, len(m.content))
-	for i, line := range m.content {
-		visibleLines[i] = sliceLine(line, m.xOffset, m.width)
-	}
-	m.viewport.SetContent(strings.Join(visibleLines, "\n"))
-}
-
-func sliceLine(line string, offset, width int) string {
-	// Use lipgloss.Width for accurate width calculation
-	lineWidth := lipgloss.Width(line)
-	
-	// If line fits entirely, return as-is
-	if offset == 0 && lineWidth <= width {
-		return line
-	}
-	
-	// If offset is beyond line length, return empty
-	if offset >= lineWidth {
-		return ""
-	}
-	
-	// Extract the visible portion using rune-based slicing
-	runes := []rune(line)
-	var result strings.Builder
-	var ansiBuffer strings.Builder
-	inAnsi := false
-	visiblePos := 0
-	writtenChars := 0
-	
-	for i := 0; i < len(runes); i++ {
-		r := runes[i]
-		
-		// Detect ANSI escape sequence start
-		if r == '\x1b' {
-			inAnsi = true
-			ansiBuffer.WriteRune(r)
-			continue
-		}
-		
-		// Continue collecting ANSI sequence
-		if inAnsi {
-			ansiBuffer.WriteRune(r)
-			// ANSI sequence ends with a letter
-			if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') {
-				// Write the complete ANSI sequence
-				result.WriteString(ansiBuffer.String())
-				ansiBuffer.Reset()
-				inAnsi = false
-			}
-			continue
-		}
-		
-		// Handle visible character
-		if visiblePos >= offset && writtenChars < width {
-			result.WriteRune(r)
-			writtenChars++
-		}
-		visiblePos++
-		
-		if writtenChars >= width {
-			break
-		}
-	}
-	
-	// Add any remaining ANSI codes
-	if ansiBuffer.Len() > 0 {
-		result.WriteString(ansiBuffer.String())
-	}
-	
-	return result.String()
 }
 
 func (m model) View() string {
@@ -194,18 +92,10 @@ func (m model) View() string {
 		return "Initializing..."
 	}
 
-	// Calculate visible range
-	maxHScroll := m.contentWidth - m.width
-	if maxHScroll < 0 {
-		maxHScroll = 0
-	}
-
 	statusBar := statusBarStyle.Render(fmt.Sprintf(
-		"↑↓/kj: vertical | ←→/hl: horizontal | g/G: top/bottom | 0/$: left/right | q: quit | Line: %d/%d | Col: %d/%d",
+		"↑↓/kj: vertical | ←→/hl: horizontal | g/G: top/bottom | q: quit | Line: %d/%d",
 		m.viewport.YOffset+1,
 		len(m.content),
-		m.xOffset+1,
-		m.contentWidth,
 	))
 
 	return m.viewport.View() + "\n" + statusBar
@@ -318,14 +208,14 @@ func applySelector(data interface{}, selector string) interface{} {
 	for i, key := range path {
 		m, ok := current.(map[string]interface{})
 		if !ok {
-			fmt.Fprintf(os.Stderr, "Error: cannot traverse into non-object at path '%s'\n",
+			fmt.Fprintf(os.Stderr, "Error: cannot traverse into non-object at path '%s'",
 				strings.Join(path[:i], "."))
 			os.Exit(1)
 		}
 
 		val, exists := m[key]
 		if !exists {
-			fmt.Fprintf(os.Stderr, "Error: key '%s' not found in path '%s'\n",
+			fmt.Fprintf(os.Stderr, "Error: key '%s' not found in path '%s'",
 				key, strings.Join(path[:i+1], "."))
 			os.Exit(1)
 		}
@@ -430,7 +320,7 @@ func createTable(buf *bytes.Buffer, format string) *tablewriter.Table {
 func truncateValue(s string, maxWidth int) string {
 	// Replace newlines with spaces for single-line display
 	s = strings.ReplaceAll(s, "\n", " ")
-	s = strings.ReplaceAll(s, "\r", " ")
+	s = strings.ReplaceAll(s, "", " ")
 
 	// Collapse multiple spaces
 	for strings.Contains(s, "  ") {
