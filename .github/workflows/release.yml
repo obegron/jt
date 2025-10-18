@@ -50,22 +50,12 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.ref }}
-          release_name: Release ${{ github.ref }}
-          draft: false
-          prerelease: false
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-      - name: Upload Release Assets
-        uses: softprops/action-gh-release@v1
+      - name: Release
+        uses: softprops/action-gh-release@v2.0.4
         with:
           files: artifacts/*/*
         env:
