@@ -142,85 +142,91 @@ func getContentWidth(content string) int {
 	return maxWidth
 }
 
+func isFile(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
+}
+
+func isSelector(s string) bool {
+	if s == "." {
+		return true
+	}
+	if len(s) >= 2 && s[0] == '.' {
+		firstChar := s[1]
+		return (firstChar >= 'a' && firstChar <= 'z') ||
+			(firstChar >= 'A' && firstChar <= 'Z') ||
+			firstChar == '['
+	}
+	return false
+}
+
+func stdinHasData() bool {
+	stat, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	return (stat.Mode() & os.ModeCharDevice) == 0
+}
+
+func readStdin() []byte {
+	input, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Error reading from stdin:", err)
+		os.Exit(1)
+	}
+	return input
+}
+
+func readFile(filepath string) []byte {
+	input, err := os.ReadFile(filepath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Error reading file:", err)
+		os.Exit(1)
+	}
+	return input
+}
+
+func handleNoArgs() ([]byte, string) {
+	if !stdinHasData() {
+		fmt.Fprintln(os.Stderr, "Usage: cat data.json | jt [selector]")
+		fmt.Fprintln(os.Stderr, "       jt <file> [selector]")
+		os.Exit(1)
+	}
+	return readStdin(), "."
+}
+
+func handleOneArg(arg string) ([]byte, string) {
+	if isFile(arg) {
+		return readFile(arg), "."
+	}
+	if isSelector(arg) {
+		if !stdinHasData() {
+			fmt.Fprintln(os.Stderr, "Error: selector provided but no data piped to stdin")
+			os.Exit(1)
+		}
+		return readStdin(), arg
+	}
+	fmt.Fprintf(os.Stderr, "Error: file not found: %s\n", arg)
+	os.Exit(1)
+	return nil, "" // Unreachable
+}
+
+func handleTwoOrMoreArgs(args []string) ([]byte, string) {
+	return readFile(args[0]), args[1]
+}
+
 func readInput() ([]byte, string) {
 	args := flag.Args()
 	var input []byte
 	var selector string
-	var err error
 
-	// Check if stdin has data (is being piped to)
-	stdinHasData := false
-	if stat, err := os.Stdin.Stat(); err == nil {
-		stdinHasData = (stat.Mode() & os.ModeCharDevice) == 0
-	}
-
-	// Helper function to check if a path is a file
-	isFile := func(path string) bool {
-		info, err := os.Stat(path)
-		return err == nil && !info.IsDir()
-	}
-
-	// Helper function to check if arg looks like a selector
-	// Selectors are: "." or start with "." followed by a letter/bracket
-	isSelector := func(s string) bool {
-		if s == "." {
-			return true
-		}
-		if len(s) >= 2 && s[0] == '.' && (s[1] >= 'a' && s[1] <= 'z' || s[1] >= 'A' && s[1] <= 'Z' || s[1] == '[') {
-			return true
-		}
-		return false
-	}
-
-	// Determine if we're reading from stdin or file
-	if len(args) == 0 {
-		// No args: must read from stdin
-		if !stdinHasData {
-			fmt.Fprintln(os.Stderr, "Usage: cat data.json | jt [selector]")
-			fmt.Fprintln(os.Stderr, "       jt <file> [selector]")
-			os.Exit(1)
-		}
-		input, err = io.ReadAll(os.Stdin)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "Error reading from stdin:", err)
-			os.Exit(1)
-		}
-		selector = "."
-	} else if len(args) == 1 {
-		// One arg: check if it's a file first, otherwise treat as selector
-		if isFile(args[0]) {
-			// It's a file
-			input, err = os.ReadFile(args[0])
-			if err != nil {
-				fmt.Fprintln(os.Stderr, "Error reading file:", err)
-				os.Exit(1)
-			}
-			selector = "."
-		} else if isSelector(args[0]) {
-			// It's a selector, read from stdin
-			if !stdinHasData {
-				fmt.Fprintln(os.Stderr, "Error: selector provided but no data piped to stdin")
-				os.Exit(1)
-			}
-			input, err = io.ReadAll(os.Stdin)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, "Error reading from stdin:", err)
-				os.Exit(1)
-			}
-			selector = args[0]
-		} else {
-			// Not a file and not a selector - assume it's a file path that doesn't exist
-			fmt.Fprintf(os.Stderr, "Error: file not found: %s\n", args[0])
-			os.Exit(1)
-		}
-	} else {
-		// Two or more args: first is file, second is selector
-		input, err = os.ReadFile(args[0])
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "Error reading file:", err)
-			os.Exit(1)
-		}
-		selector = args[1]
+	switch len(args) {
+	case 0:
+		input, selector = handleNoArgs()
+	case 1:
+		input, selector = handleOneArg(args[0])
+	default: // 2 or more
+		input, selector = handleTwoOrMoreArgs(args)
 	}
 
 	if len(input) == 0 {
