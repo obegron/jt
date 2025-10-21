@@ -107,10 +107,10 @@ func main() {
 	flag.Parse()
 
 	input, selector := readInput()
-	data := parseInput(input)
+	data, isMultiDoc := parseInput(input)
 	data = applySelector(data, selector)
 
-	render(data, *format, *details, *maxWidth)
+	render(data, *format, *details, *maxWidth, isMultiDoc)
 }
 
 func isTerminal() bool {
@@ -237,20 +237,51 @@ func readInput() ([]byte, string) {
 	return input, selector
 }
 
-func parseInput(input []byte) interface{} {
+func parseInput(input []byte) (interface{}, bool) {
 	var data interface{}
-	if err := json.Unmarshal(input, &data); err != nil {
-		if err := yaml.Unmarshal(input, &data); err != nil {
+	if err := json.Unmarshal(input, &data); err == nil {
+		return data, false
+	}
+
+	decoder := yaml.NewDecoder(bytes.NewReader(input))
+	var documents []interface{}
+	for {
+		var doc interface{}
+		if err := decoder.Decode(&doc); err != nil {
+			if err == io.EOF {
+				break
+			}
 			fmt.Fprintln(os.Stderr, "Error: Input is not valid JSON or YAML.")
 			os.Exit(1)
 		}
+		documents = append(documents, doc)
 	}
-	return data
+
+	if len(documents) == 0 {
+		return map[string]interface{}{}, false
+	}
+
+	if len(documents) == 1 {
+		return documents[0], false
+	}
+
+	return documents, true
 }
 
 func applySelector(data interface{}, selector string) interface{} {
 	if selector == "." {
 		return data
+	}
+
+	if docs, ok := data.([]interface{}); ok {
+		trimmedSelector := strings.TrimPrefix(selector, ".")
+		if !strings.HasPrefix(trimmedSelector, "[") {
+			var results []interface{}
+			for _, doc := range docs {
+				results = append(results, applySelector(doc, selector))
+			}
+			return results
+		}
 	}
 
 	// Normalize selector to handle array indexing
@@ -308,8 +339,19 @@ func applySelector(data interface{}, selector string) interface{} {
 	return current
 }
 
-func render(data interface{}, format string, details bool, maxWidth int) {
-	output := renderRecursive(data, details, format, maxWidth)
+func render(data interface{}, format string, details bool, maxWidth int, isMultiDoc bool) {
+	var output string
+	docs, isSlice := data.([]interface{})
+
+	if isMultiDoc && isSlice {
+		var outputs []string
+		for _, doc := range docs {
+			outputs = append(outputs, renderRecursive(doc, details, format, maxWidth))
+		}
+		output = strings.Join(outputs, "\n")
+	} else {
+		output = renderRecursive(data, details, format, maxWidth)
+	}
 
 	// For HTML, add CSS styling at the beginning
 	if format == "html" {
