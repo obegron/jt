@@ -516,11 +516,30 @@ func handleSlice(table *tablewriter.Table, v []interface{}, details bool, format
 
 	for i, item := range v {
 		if m, ok := item.(map[string]interface{}); ok {
-			row := []string{fmt.Sprintf("%d", i)}
+			row := []string{}
+			
+			// Add index column with styling
+			if useColor {
+				row = append(row, keyStyle.Render(fmt.Sprintf("%d", i)))
+			} else if format == "html" {
+				row = append(row, fmt.Sprintf(`<span class="jt-key">%d</span>`, i))
+			} else {
+				row = append(row, fmt.Sprintf("%d", i))
+			}
+			
+			// Add value columns with styling
 			for _, key := range headers[1:] {
 				val := m[key]
 				value := formatValue(val, details, format, maxWidth)
-				row = append(row, value)
+				
+				if useColor {
+					row = append(row, getStyle(val).Render(value))
+				} else if format == "html" {
+					cssClass := getHTMLClass(val)
+					row = append(row, fmt.Sprintf(`<span class="%s">%s</span>`, cssClass, value))
+				} else {
+					row = append(row, value)
+				}
 			}
 			table.Append(row)
 		} else {
