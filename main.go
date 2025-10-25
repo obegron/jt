@@ -13,6 +13,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/olekukonko/tablewriter"
@@ -33,17 +34,43 @@ var (
 			Foreground(lipgloss.Color("#c6d0f5")).
 			Background(lipgloss.Color("#414559")).
 			Padding(0, 1)
+
+	searchBoxStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("#ca9ee6")).
+			Padding(0, 1).
+			Width(50)
+
+	highlightStyle = lipgloss.NewStyle().
+			Background(lipgloss.Color("#e5c890")).
+			Foreground(lipgloss.Color("#232634"))
+
+	currentMatchStyle = lipgloss.NewStyle().
+				Background(lipgloss.Color("#ef9f76")).
+				Foreground(lipgloss.Color("#232634"))
 )
 
 const maxValueWidth = 80
 
+type searchMatch struct {
+	line int
+	col  int
+	text string
+}
+
 type model struct {
-	viewport     viewport.Model
-	content      []string // lines of content
-	ready        bool
-	contentWidth int
-	width        int
-	height       int
+	viewport       viewport.Model
+	content        []string // lines of content
+	plainContent   []string // content without ANSI codes for searching
+	ready          bool
+	contentWidth   int
+	width          int
+	height         int
+	searchMode     bool
+	searchInput    textinput.Model
+	searchTerm     string
+	matches        []searchMatch
+	currentMatch   int
 }
 
 func (m model) Init() tea.Cmd {
@@ -59,7 +86,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		if !m.ready {
 			m.viewport = viewport.New(msg.Width, msg.Height-1)
-			m.viewport.SetContent(strings.Join(m.content, "\n"))
+			m.viewport.SetContent(m.renderContent())
 			m.ready = true
 		} else {
 			m.viewport.Width = msg.Width
@@ -67,17 +94,57 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.KeyMsg:
-		switch msg.String() {
-		case "q", "ctrl+c", "esc":
-			return m, tea.Quit
-		case "l", "right":
-			m.viewport.ScrollRight(5)
-		case "h", "left":
-			m.viewport.ScrollLeft(5)
-		case "g", "home":
-			m.viewport.GotoTop()
-		case "G", "end":
-			m.viewport.GotoBottom()
+		if m.searchMode {
+			switch msg.String() {
+			case "esc":
+				m.searchMode = false
+				m.searchInput.Blur()
+				return m, nil
+			case "enter":
+				m.searchTerm = m.searchInput.Value()
+				m.findMatches()
+				if len(m.matches) > 0 {
+					m.currentMatch = 0
+					m.jumpToMatch()
+				}
+				m.viewport.SetContent(m.renderContent())
+				return m, nil
+			default:
+				m.searchInput, cmd = m.searchInput.Update(msg)
+				return m, cmd
+			}
+		} else {
+			switch msg.String() {
+			case "q", "ctrl+c":
+				return m, tea.Quit
+			case "/":
+				m.searchMode = true
+				m.searchInput.Focus()
+				m.searchInput.SetValue("")
+				return m, textinput.Blink
+			case "n":
+				if len(m.matches) > 0 {
+					m.currentMatch = (m.currentMatch + 1) % len(m.matches)
+					m.jumpToMatch()
+					m.viewport.SetContent(m.renderContent())
+				}
+				return m, nil
+			case "N", "p":
+				if len(m.matches) > 0 {
+					m.currentMatch = (m.currentMatch - 1 + len(m.matches)) % len(m.matches)
+					m.jumpToMatch()
+					m.viewport.SetContent(m.renderContent())
+				}
+				return m, nil
+			case "l", "right":
+				m.viewport.ScrollRight(5)
+			case "h", "left":
+				m.viewport.ScrollLeft(5)
+			case "g", "home":
+				m.viewport.GotoTop()
+			case "G", "end":
+				m.viewport.GotoBottom()
+			}
 		}
 	}
 
@@ -86,18 +153,155 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m *model) findMatches() {
+	m.matches = []searchMatch{}
+	if m.searchTerm == "" {
+		return
+	}
+
+	searchLower := strings.ToLower(m.searchTerm)
+	for lineNum, line := range m.plainContent {
+		lineLower := strings.ToLower(line)
+		col := 0
+		for {
+			idx := strings.Index(lineLower[col:], searchLower)
+			if idx == -1 {
+				break
+			}
+			actualCol := col + idx
+			m.matches = append(m.matches, searchMatch{
+				line: lineNum,
+				col:  actualCol,
+				text: m.searchTerm,
+			})
+			col = actualCol + 1
+		}
+	}
+}
+
+func (m *model) jumpToMatch() {
+	if len(m.matches) == 0 {
+		return
+	}
+	match := m.matches[m.currentMatch]
+	m.viewport.SetYOffset(match.line)
+}
+
+func (m *model) renderContent() string {
+	if m.searchTerm == "" {
+		return strings.Join(m.content, "\n")
+	}
+
+	highlightedLines := make([]string, len(m.content))
+	copy(highlightedLines, m.content)
+
+	// Group matches by line for efficient highlighting
+	matchesByLine := make(map[int][]searchMatch)
+	for _, match := range m.matches {
+		matchesByLine[match.line] = append(matchesByLine[match.line], match)
+	}
+
+	// Highlight each line with matches
+	for lineNum, matches := range matchesByLine {
+		if lineNum >= len(m.plainContent) {
+			continue
+		}
+		line := m.plainContent[lineNum]
+		
+		// Sort matches by column to process left to right
+		sort.Slice(matches, func(i, j int) bool {
+			return matches[i].col < matches[j].col
+		})
+
+		// Build highlighted line
+		var result strings.Builder
+		lastPos := 0
+		
+		for i, match := range matches {
+			// Add text before match
+			if match.col > lastPos {
+				result.WriteString(line[lastPos:match.col])
+			}
+			
+			// Add highlighted match
+			matchText := line[match.col : match.col+len(m.searchTerm)]
+			isCurrentMatch := false
+			for j, currentMatch := range m.matches {
+				if j == m.currentMatch && currentMatch.line == lineNum && currentMatch.col == match.col {
+					isCurrentMatch = true
+					break
+				}
+			}
+			
+			if isCurrentMatch {
+				result.WriteString(currentMatchStyle.Render(matchText))
+			} else {
+				result.WriteString(highlightStyle.Render(matchText))
+			}
+			
+			lastPos = match.col + len(m.searchTerm)
+			
+			// Add remaining text after last match
+			if i == len(matches)-1 && lastPos < len(line) {
+				result.WriteString(line[lastPos:])
+			}
+		}
+		
+		highlightedLines[lineNum] = result.String()
+	}
+
+	return strings.Join(highlightedLines, "\n")
+}
+
 func (m model) View() string {
 	if !m.ready {
 		return "Initializing..."
 	}
 
-	statusBar := statusBarStyle.Render(fmt.Sprintf(
-		"↑↓/kj: vertical | ←→/hl: horizontal | g/G: jump | q: quit | Line: %d/%d",
-		m.viewport.YOffset+1,
-		len(m.content),
-	))
+	var statusText string
+	if m.searchTerm != "" && len(m.matches) > 0 {
+		statusText = fmt.Sprintf(
+			"↑↓/kj: vertical | ←→/hl: horizontal | g/G: jump | n/p: next/prev match | /: search | q: quit | Match: %d/%d | Line: %d/%d",
+			m.currentMatch+1,
+			len(m.matches),
+			m.viewport.YOffset+1,
+			len(m.content),
+		)
+	} else if m.searchTerm != "" {
+		statusText = fmt.Sprintf(
+			"↑↓/kj: vertical | ←→/hl: horizontal | g/G: jump | /: search | q: quit | No matches | Line: %d/%d",
+			m.viewport.YOffset+1,
+			len(m.content),
+		)
+	} else {
+		statusText = fmt.Sprintf(
+			"↑↓/kj: vertical | ←→/hl: horizontal | g/G: jump | /: search | q: quit | Line: %d/%d",
+			m.viewport.YOffset+1,
+			len(m.content),
+		)
+	}
 
-	return m.viewport.View() + "\n" + statusBar
+	statusBar := statusBarStyle.Render(statusText)
+
+	view := m.viewport.View() + "\n" + statusBar
+
+	if m.searchMode {
+		searchBox := searchBoxStyle.Render("Search: " + m.searchInput.View())
+		
+		// Place search box in center of screen
+		view = lipgloss.Place(
+			m.width,
+			m.height,
+			lipgloss.Center,
+			lipgloss.Center,
+			searchBox,
+			lipgloss.WithWhitespaceChars(" "),
+		)
+		// Keep status bar at bottom
+		view = view[:len(view)-len(statusBar)-1] + "\n" + statusBar
+	}
+
+	return view
 }
 
 func main() {
@@ -140,6 +344,26 @@ func getContentWidth(content string) int {
 		}
 	}
 	return maxWidth
+}
+
+func stripANSI(s string) string {
+	// Simple ANSI code stripper for search purposes
+	var result strings.Builder
+	inEscape := false
+	for _, r := range s {
+		if r == '\x1b' {
+			inEscape = true
+			continue
+		}
+		if inEscape {
+			if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') {
+				inEscape = false
+			}
+			continue
+		}
+		result.WriteRune(r)
+	}
+	return result.String()
 }
 
 func isFile(path string) bool {
@@ -390,9 +614,20 @@ func render(data interface{}, format string, details bool, maxWidth int, isMulti
 		// Use interactive viewer if content is wider than terminal
 		if contentWidth > termWidth {
 			lines := strings.Split(output, "\n")
+			plainLines := make([]string, len(lines))
+			for i, line := range lines {
+				plainLines[i] = stripANSI(line)
+			}
+
+			ti := textinput.New()
+			ti.Placeholder = "Type to search..."
+			ti.CharLimit = 100
+
 			m := model{
 				content:      lines,
+				plainContent: plainLines,
 				contentWidth: contentWidth,
+				searchInput:  ti,
 			}
 			p := tea.NewProgram(m, tea.WithAltScreen())
 			if _, err := p.Run(); err != nil {
