@@ -59,18 +59,18 @@ type searchMatch struct {
 }
 
 type model struct {
-	viewport       viewport.Model
-	content        []string // lines of content
-	plainContent   []string // content without ANSI codes for searching
-	ready          bool
-	contentWidth   int
-	width          int
-	height         int
-	searchMode     bool
-	searchInput    textinput.Model
-	searchTerm     string
-	matches        []searchMatch
-	currentMatch   int
+	viewport     viewport.Model
+	content      []string // lines of content
+	plainContent []string // content without ANSI codes for searching
+	ready        bool
+	contentWidth int
+	width        int
+	height       int
+	searchMode   bool
+	searchInput  textinput.Model
+	searchTerm   string
+	matches      []searchMatch
+	currentMatch int
 }
 
 func (m model) Init() tea.Cmd {
@@ -106,6 +106,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if len(m.matches) > 0 {
 					m.currentMatch = 0
 					m.jumpToMatch()
+					m.searchMode = false
+					m.searchInput.Blur()
 				}
 				m.viewport.SetContent(m.renderContent())
 				return m, nil
@@ -207,7 +209,7 @@ func (m *model) renderContent() string {
 			continue
 		}
 		line := m.plainContent[lineNum]
-		
+
 		// Sort matches by column to process left to right
 		sort.Slice(matches, func(i, j int) bool {
 			return matches[i].col < matches[j].col
@@ -216,13 +218,13 @@ func (m *model) renderContent() string {
 		// Build highlighted line
 		var result strings.Builder
 		lastPos := 0
-		
+
 		for i, match := range matches {
 			// Add text before match
 			if match.col > lastPos {
 				result.WriteString(line[lastPos:match.col])
 			}
-			
+
 			// Add highlighted match
 			matchText := line[match.col : match.col+len(m.searchTerm)]
 			isCurrentMatch := false
@@ -232,21 +234,21 @@ func (m *model) renderContent() string {
 					break
 				}
 			}
-			
+
 			if isCurrentMatch {
 				result.WriteString(currentMatchStyle.Render(matchText))
 			} else {
 				result.WriteString(highlightStyle.Render(matchText))
 			}
-			
+
 			lastPos = match.col + len(m.searchTerm)
-			
+
 			// Add remaining text after last match
 			if i == len(matches)-1 && lastPos < len(line) {
 				result.WriteString(line[lastPos:])
 			}
 		}
-		
+
 		highlightedLines[lineNum] = result.String()
 	}
 
@@ -287,7 +289,7 @@ func (m model) View() string {
 
 	if m.searchMode {
 		searchBox := searchBoxStyle.Render("Search: " + m.searchInput.View())
-		
+
 		// Place search box in center of screen
 		view = lipgloss.Place(
 			m.width,
@@ -752,7 +754,7 @@ func handleSlice(table *tablewriter.Table, v []interface{}, details bool, format
 	for i, item := range v {
 		if m, ok := item.(map[string]interface{}); ok {
 			row := []string{}
-			
+
 			// Add index column with styling
 			if useColor {
 				row = append(row, keyStyle.Render(fmt.Sprintf("%d", i)))
@@ -761,12 +763,12 @@ func handleSlice(table *tablewriter.Table, v []interface{}, details bool, format
 			} else {
 				row = append(row, fmt.Sprintf("%d", i))
 			}
-			
+
 			// Add value columns with styling
 			for _, key := range headers[1:] {
 				val := m[key]
 				value := formatValue(val, details, format, maxWidth)
-				
+
 				if useColor {
 					row = append(row, getStyle(val).Render(value))
 				} else if format == "html" {
