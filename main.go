@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"encoding/xml"
 	"flag"
 	"fmt"
 	"io"
@@ -179,6 +180,97 @@ func (m *model) findMatches() {
 			col = actualCol + 1
 		}
 	}
+}
+
+// xml
+func parseXML(input []byte) (interface{}, error) {
+	decoder := xml.NewDecoder(bytes.NewReader(input))
+	var result interface{}
+
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+
+		if se, ok := token.(xml.StartElement); ok {
+			result = parseXMLElement(decoder, se)
+			break
+		}
+	}
+
+	return result, nil
+}
+
+func parseXMLElement(decoder *xml.Decoder, start xml.StartElement) interface{} {
+	children := make(map[string][]interface{})
+	var text strings.Builder
+	hasAttributes := len(start.Attr) > 0
+
+	// Handle attributes
+	var attrs map[string]interface{}
+	if hasAttributes {
+		attrs = make(map[string]interface{})
+		for _, attr := range start.Attr {
+			attrs["@"+attr.Name.Local] = attr.Value
+		}
+	}
+
+	for {
+		token, err := decoder.Token()
+		if err != nil {
+			break
+		}
+
+		switch t := token.(type) {
+		case xml.StartElement:
+			child := parseXMLElement(decoder, t)
+			children[t.Name.Local] = append(children[t.Name.Local], child)
+		case xml.CharData:
+			text.Write(t)
+		case xml.EndElement:
+			textContent := strings.TrimSpace(text.String())
+
+			// If we have no children and no attributes, just return text
+			if len(children) == 0 && !hasAttributes {
+				if textContent != "" {
+					return textContent
+				}
+				return ""
+			}
+
+			// Build result map
+			result := make(map[string]interface{})
+
+			// Add attributes first (prefixed with @)
+			if hasAttributes {
+				for k, v := range attrs {
+					result[k] = v
+				}
+			}
+
+			// Add children
+			for key, values := range children {
+				if len(values) == 1 {
+					result[key] = values[0]
+				} else {
+					result[key] = values
+				}
+			}
+
+			// Add text content if present
+			if textContent != "" {
+				result["#text"] = textContent
+			}
+
+			return result
+		}
+	}
+
+	return nil
 }
 
 func (m *model) jumpToMatch() {
@@ -467,6 +559,10 @@ func parseInput(input []byte) (interface{}, bool) {
 	var data interface{}
 	if err := json.Unmarshal(input, &data); err == nil {
 		return data, false
+	}
+
+	if xmlData, err := parseXML(input); err == nil {
+		return xmlData, false
 	}
 
 	decoder := yaml.NewDecoder(bytes.NewReader(input))
