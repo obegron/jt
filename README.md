@@ -1,6 +1,6 @@
-# jt - JSON/YAML to Table
+# jt - JSON/YAML/XML to Table
 
-A command-line tool to render JSON or YAML data as tables.
+A command-line tool to render JSON, YAML or XML data as tables.
 
 ```json
 {
