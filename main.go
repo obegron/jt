@@ -186,6 +186,7 @@ func (m *model) findMatches() {
 func parseXML(input []byte) (interface{}, error) {
 	decoder := xml.NewDecoder(bytes.NewReader(input))
 	var result interface{}
+	foundStartElement := false // New flag
 
 	for {
 		token, err := decoder.Token()
@@ -198,8 +199,13 @@ func parseXML(input []byte) (interface{}, error) {
 
 		if se, ok := token.(xml.StartElement); ok {
 			result = parseXMLElement(decoder, se)
+			foundStartElement = true // Set flag
 			break
 		}
+	}
+
+	if !foundStartElement && result == nil { // If no start element found and result is still nil
+		return nil, fmt.Errorf("no XML start element found") // Return an explicit error
 	}
 
 	return result, nil
