@@ -26,6 +26,7 @@ import (
 
 var (
 	headerStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#ca9ee6"))
+	borderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#9aa0a6"))
 	keyStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#c6d0f5"))
 	stringStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#a6d189"))
 	boolStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#ea999c"))
@@ -466,6 +467,40 @@ func stripANSI(s string) string {
 	return result.String()
 }
 
+func colorizeBorders(s string) string {
+	var result strings.Builder
+	inEscape := false
+	for _, r := range s {
+		if r == '\x1b' {
+			inEscape = true
+			result.WriteRune(r)
+			continue
+		}
+		if inEscape {
+			result.WriteRune(r)
+			if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') {
+				inEscape = false
+			}
+			continue
+		}
+		if isBorderRune(r) {
+			result.WriteString(borderStyle.Render(string(r)))
+		} else {
+			result.WriteRune(r)
+		}
+	}
+	return result.String()
+}
+
+func isBorderRune(r rune) bool {
+	switch r {
+	case '┌', '┐', '└', '┘', '├', '┤', '┬', '┴', '┼', '─', '│',
+		'┏', '┓', '┗', '┛', '┣', '┫', '┳', '┻', '╋', '━', '┃':
+		return true
+	}
+	return false
+}
+
 func isFile(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && !info.IsDir()
@@ -754,7 +789,11 @@ func renderRecursive(data interface{}, details bool, format string, maxWidth int
 	appendData(table, data, details, format, maxWidth)
 	table.Render()
 
-	return buf.String()
+	output := buf.String()
+	if format == "table" && isTerminal() {
+		output = colorizeBorders(output)
+	}
+	return output
 }
 
 func createTable(buf *bytes.Buffer, format string) *tablewriter.Table {
@@ -872,10 +911,18 @@ func handleSlice(table *tablewriter.Table, v []interface{}, details bool, format
 				value := formatValue(val, details, format, maxWidth)
 
 				if useColor {
-					row = append(row, getStyle(val).Render(value))
+					if isNestedValue(val) {
+						row = append(row, value)
+					} else {
+						row = append(row, getStyle(val).Render(value))
+					}
 				} else if format == "html" {
 					cssClass := getHTMLClass(val)
-					row = append(row, fmt.Sprintf(`<span class="%s">%s</span>`, cssClass, value))
+					if isNestedValue(val) {
+						row = append(row, value)
+					} else {
+						row = append(row, fmt.Sprintf(`<span class="%s">%s</span>`, cssClass, value))
+					}
 				} else {
 					row = append(row, value)
 				}
@@ -919,21 +966,36 @@ func buildHeaders(v []interface{}) []string {
 
 func appendRow(table *tablewriter.Table, key, value string, originalVal interface{}, useColor bool, format string) {
 	if useColor {
+		styledValue := value
+		if !isNestedValue(originalVal) {
+			styledValue = getStyle(originalVal).Render(value)
+		}
 		table.Append([]string{
 			keyStyle.Render(key),
-			getStyle(originalVal).Render(value),
+			styledValue,
 		})
 	} else if format == "html" {
 		// Add color styling via CSS classes for HTML output
 		cssClass := getHTMLClass(originalVal)
 
 		styledKey := fmt.Sprintf(`<span class="jt-key">%s</span>`, key)
-		styledValue := fmt.Sprintf(`<span class="%s">%s</span>`, cssClass, value)
+		styledValue := value
+		if !isNestedValue(originalVal) {
+			styledValue = fmt.Sprintf(`<span class="%s">%s</span>`, cssClass, value)
+		}
 
 		table.Append([]string{styledKey, styledValue})
 	} else {
 		table.Append([]string{key, value})
 	}
+}
+
+func isNestedValue(val interface{}) bool {
+	switch val.(type) {
+	case map[string]interface{}, []interface{}:
+		return true
+	}
+	return false
 }
 
 func getHTMLClass(val interface{}) string {
