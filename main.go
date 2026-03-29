@@ -12,11 +12,11 @@ import (
 	"strconv"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
+	"charm.land/lipgloss/v2"
 	"github.com/olekukonko/tablewriter"
 	"github.com/olekukonko/tablewriter/renderer"
 	"github.com/olekukonko/tablewriter/tw"
@@ -87,15 +87,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		if !m.ready {
-			m.viewport = viewport.New(msg.Width, msg.Height-1)
+			m.viewport = viewport.New(
+				viewport.WithWidth(msg.Width),
+				viewport.WithHeight(msg.Height-1),
+			)
 			m.viewport.SetContent(m.renderContent())
 			m.ready = true
 		} else {
-			m.viewport.Width = msg.Width
-			m.viewport.Height = msg.Height - 1
+			m.viewport.SetWidth(msg.Width)
+			m.viewport.SetHeight(msg.Height - 1)
 		}
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if m.searchMode {
 			switch msg.String() {
 			case "esc":
@@ -354,9 +357,15 @@ func (m *model) renderContent() string {
 	return strings.Join(highlightedLines, "\n")
 }
 
-func (m model) View() string {
+func (m model) newView(content string) tea.View {
+	v := tea.NewView(content)
+	v.AltScreen = true
+	return v
+}
+
+func (m model) View() tea.View {
 	if !m.ready {
-		return "Initializing..."
+		return m.newView("Initializing...")
 	}
 
 	var statusText string
@@ -365,19 +374,19 @@ func (m model) View() string {
 			"↑↓/kj: vertical | ←→/hl: horizontal | g/G: jump | n/p: next/prev match | /: search | q: quit | Match: %d/%d | Line: %d/%d",
 			m.currentMatch+1,
 			len(m.matches),
-			m.viewport.YOffset+1,
+			m.viewport.YOffset()+1,
 			len(m.content),
 		)
 	} else if m.searchTerm != "" {
 		statusText = fmt.Sprintf(
 			"↑↓/kj: vertical | ←→/hl: horizontal | g/G: jump | /: search | q: quit | No matches | Line: %d/%d",
-			m.viewport.YOffset+1,
+			m.viewport.YOffset()+1,
 			len(m.content),
 		)
 	} else {
 		statusText = fmt.Sprintf(
 			"↑↓/kj: vertical | ←→/hl: horizontal | g/G: jump | /: search | q: quit | Line: %d/%d",
-			m.viewport.YOffset+1,
+			m.viewport.YOffset()+1,
 			len(m.content),
 		)
 	}
@@ -402,7 +411,7 @@ func (m model) View() string {
 		view = view[:len(view)-len(statusBar)-1] + "\n" + statusBar
 	}
 
-	return view
+	return m.newView(view)
 }
 
 func main() {
@@ -768,7 +777,7 @@ func render(data interface{}, format string, details bool, maxWidth int, isMulti
 				contentWidth: contentWidth,
 				searchInput:  ti,
 			}
-			p := tea.NewProgram(m, tea.WithAltScreen())
+			p := tea.NewProgram(m)
 			if _, err := p.Run(); err != nil {
 				fmt.Fprintf(os.Stderr, "Error running interactive viewer: %v\n", err)
 				// Fallback to regular output
