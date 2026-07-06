@@ -3,9 +3,9 @@ module github.com/obegron/jt
 go 1.25.3
 
 require (
-	charm.land/bubbles/v2 v2.1.0
+	charm.land/bubbles/v2 v2.1.1
 	charm.land/bubbletea/v2 v2.0.7
-	charm.land/lipgloss/v2 v2.0.3
+	charm.land/lipgloss/v2 v2.0.4
 	github.com/olekukonko/tablewriter v1.1.4
 	golang.org/x/term v0.43.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -27,7 +27,7 @@ require (
 	github.com/lucasb-eyer/go-colorful v1.4.0 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
-	github.com/mattn/go-runewidth v0.0.23 // indirect
+	github.com/mattn/go-runewidth v0.0.24 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/olekukonko/cat v0.0.0-20250911104152-50322a0618f6 // indirect
 	github.com/olekukonko/errors v1.2.0 // indirect
