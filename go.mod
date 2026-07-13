@@ -5,7 +5,7 @@ go 1.25.3
 require (
 	charm.land/bubbles/v2 v2.1.1
 	charm.land/bubbletea/v2 v2.0.7
-	charm.land/lipgloss/v2 v2.0.4
+	charm.land/lipgloss/v2 v2.0.5
 	github.com/olekukonko/tablewriter v1.1.4
 	golang.org/x/term v0.45.0
 	gopkg.in/yaml.v3 v3.0.1
